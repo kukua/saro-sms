@@ -32,6 +32,8 @@ const log = Bunyan.createLogger({
 log.level('debug')
 
 const twilio = new Twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
+const senderID = String(process.env.SENDER_ID || '')
+const sendInterval = Number(process.env.SEND_INTERVAL_MS) || 30000
 
 function error (...args) {
 	log.error(...args)
@@ -39,40 +41,44 @@ function error (...args) {
 }
 
 try {
-	const numbersFile = path.resolve(process.env.NUMBERS_DB_PATH)
-	const numbers = require(numbersFile)
+	const sendersFile = path.resolve(process.env.SENDERS_DB_PATH)
+	const recipientsFile = path.resolve(process.env.RECIPIENTS_DB_PATH)
+	const senders = require(sendersFile)
+	var recipients = require(recipientsFile)
 	const validNumber = /^\+[0-9]{11,13}$/
 
-	const recipients = _(numbers)
-		.map((list) => {
-			if ( ! Array.isArray(list.recipients)) return error({ recipients }, 'Recipients not an array.')
-			if ( ! list.twilio_number) return error({ list }, 'Missing Twilio number.')
-			if ( ! list.twilio_number.match(validNumber)) return error({ list }, 'Invalid Twilio number.')
+	senders.forEach((number) => {
+		if ( ! number.match(validNumber)) return error({ number }, 'Invalid sender Twilio number.')
+	})
 
-			list.recipients.forEach((recipient) => {
-				// Note: recipient.name is optional
-				if ( ! recipient.location) return error({ recipient }, 'Missing recipient location.')
-				if ( ! recipient.number) return error({ recipient }, 'Missing recipient number.')
-				if ( ! recipient.latitude) return error({ recipient }, 'Missing recipient latitude.')
-				if ( ! recipient.longitude) return error({ recipient }, 'Missing recipient longitude.')
+	recipients = recipients.map((recipient, i) => {
+		// Note: recipient.name is optional
+		if ( ! recipient.location) return error({ recipient }, 'Missing recipient location.')
+		if ( ! recipient.number) return error({ recipient }, 'Missing recipient number.')
+		if ( ! recipient.latitude) return error({ recipient }, 'Missing recipient latitude.')
+		if ( ! recipient.longitude) return error({ recipient }, 'Missing recipient longitude.')
 
-				recipient.name = (recipient.name || 'Unnamed').toUpperCase().trim()
-				recipient.location = recipient.location.toUpperCase().trim()
-				recipient.twilio_number = list.twilio_number
+		recipient.name = (recipient.name || 'Unnamed').toUpperCase().trim()
+		recipient.location = recipient.location.toUpperCase().trim()
+		recipient.twilio_number = senders[i % senders.length]
 
-				if ( ! recipient.number.match(validNumber)) return error({ recipient }, 'Invalid recipient number.')
-			})
+		if ( ! recipient.number.match(validNumber)) return error({ recipient }, 'Invalid recipient number.')
+		if ( ! recipient.twilio_number) return error({ recipient }, 'Invalid recipient Twilio number.')
 
-			return list.recipients
-		})
-		.flatten()
-		.value()
+		return recipient
+	})
 
-	//console.log(recipients)
+	//console.log(senders, recipients); process.exit(1)
 
 	const p = parallel().timeout(5 * 60 * 1000)
-	const tomorrow = moment.utc().startOf('day').add(1, 'day')
-	const tomorrowDate = tomorrow.format('YYYY-MM-DD')
+	const date = moment.utc().startOf('day')
+
+	function findMeasurementForDateTime (measurements, date, time = '00:00') {
+		const dateString = date.format('YYYY-MM-DD')
+		const measurement = _.find(measurements, (child) => child.attributes.dt === `${dateString} ${time}`)
+
+		if (measurement) return measurement.attributes
+	}
 
 	function createTextLine (prefix, m) {
 		return `${prefix} rain ${Math.ceil(m.pr)}mm ${m.pp}% temp ${m.t}C wind ${m.wn} ${Math.round(m.ws * 3.6)}kmh hum ${m.rh}%`
@@ -90,11 +96,12 @@ try {
 		log.debug({ type: 'sending', from, to, text }, '')
 
 		twilio.messages.create({
-			from,
+			from: senderID || from,
 			to,
 			body: text,
 		}, (err, result) => {
-			log.debug({ type: 'sent', to, success: ! err, sid: result.sid }, err && err.message || '')
+			const sid = (result ? result.sid : null)
+			log.debug({ type: 'sent', to, success: ! err, sid }, err && err.message || '')
 			cb(err)
 		})
 	}
@@ -113,29 +120,31 @@ try {
 				}, (err, res, body) => {
 					if (err) return error(err)
 
-					const data = parse(body)
-					const measurements = _(data)
-						.get('root.children.0.children')
-						.filter((child) => child.name === 'fc' && child.attributes.dt.startsWith(tomorrowDate))
-						.map((child) => child.attributes)
+					log.debug({ type: 'raw', recipient, body })
 
-					if (measurements.length !== 4) {
-						log.error({ recipient, body }, 'Expected 4 measurements.')
-						return done('Expected 4 measurements.')
+					const data = parse(body)
+					const measurements = _(data).get('root.children.0.children')
+
+					const morning   = findMeasurementForDateTime(measurements, date, '06:00')
+					const afternoon = findMeasurementForDateTime(measurements, date, '12:00')
+					const evening   = findMeasurementForDateTime(measurements, date, '18:00')
+
+					if ( ! morning || ! afternoon || ! evening) {
+						const err = 'Expected morning, afternoon and evening measurement.'
+						log.error({ recipient, body }, err)
+						return done(err)
 					}
 
-					measurements.shift()
-
 					const text = prefixWithLocation(recipient.location, [
-						`${tomorrow.format('MMM D')}`,
-						createTextLine('Morn', measurements[0]),
-						createTextLine('Aft', measurements[1]),
-						createTextLine('Eve', measurements[2]),
+						`${date.format('MMM D')}`,
+						createTextLine('Morn', morning),
+						createTextLine('Aft', afternoon),
+						createTextLine('Eve', evening),
 					].join('\n'))
 
 					sendText(recipient.twilio_number, recipient.number, text, done)
 				})
-			}, 100 * i) // 10 per second
+			}, i * sendInterval)
 		})
 	})
 

@@ -1,0 +1,4 @@
+[
+	{ "name": "Test", "location": "Utrecht", "number": "+31612345678", "latitude": 10.3, "longitude": 8.4 },
+	...
+]
