@@ -1,0 +1,7 @@
+sendtexts:
+    build: ./docker/node/
+    working_dir: /data
+    env_file: .env
+    volumes:
+        - .:/data
+    command: npm start
