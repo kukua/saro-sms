@@ -41,11 +41,13 @@ function error (...args) {
 try {
 	const numbersFile = path.resolve(process.env.NUMBERS_DB_PATH)
 	const numbers = require(numbersFile)
+	const validNumber = /^\+[0-9]{11,13}$/
 
 	const recipients = _(numbers)
 		.map((list) => {
 			if ( ! Array.isArray(list.recipients)) return error({ recipients }, 'Recipients not an array.')
 			if ( ! list.twilio_number) return error({ list }, 'Missing Twilio number.')
+			if ( ! list.twilio_number.match(validNumber)) return error({ list }, 'Invalid Twilio number.')
 
 			list.recipients.forEach((recipient) => {
 				// Note: recipient.name is optional
@@ -54,7 +56,11 @@ try {
 				if ( ! recipient.latitude) return error({ recipient }, 'Missing recipient latitude.')
 				if ( ! recipient.longitude) return error({ recipient }, 'Missing recipient longitude.')
 
+				recipient.name = (recipient.name || 'Unnamed').toUpperCase().trim()
+				recipient.location = recipient.location.toUpperCase().trim()
 				recipient.twilio_number = list.twilio_number
+
+				if ( ! recipient.number.match(validNumber)) return error({ recipient }, 'Invalid recipient number.')
 			})
 
 			return list.recipients
@@ -73,8 +79,6 @@ try {
 	}
 
 	function prefixWithLocation (location, text) {
-		location = location.toUpperCase()
-
 		if (location.length + text.length + 1 /* space */ <= 160) {
 			return `${location} ${text}`
 		}
