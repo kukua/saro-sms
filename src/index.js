@@ -70,7 +70,7 @@ try {
 
 	//console.log(senders, recipients); process.exit(1)
 
-	const p = parallel().timeout(5 * 60 * 1000)
+	const p = parallel().timeout(4 * 60 * 60 * 1000)
 	const date = moment.utc().startOf('day')
 
 	function findMeasurementForDateTime (measurements, date, time = '00:00') {
