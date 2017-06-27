@@ -61,6 +61,7 @@ try {
 		recipient.name = (recipient.name || 'Unnamed').toUpperCase().trim()
 		recipient.location = recipient.location.toUpperCase().trim()
 		recipient.twilio_number = senders[i % senders.length]
+		recipient.format = (typeof recipient.format === 'number' ? recipient.format : 1)
 
 		if ( ! recipient.number.match(validNumber)) return error({ recipient }, 'Invalid recipient number.')
 		if ( ! recipient.twilio_number) return error({ recipient }, 'Invalid recipient Twilio number.')
@@ -80,16 +81,34 @@ try {
 		if (measurement) return measurement.attributes
 	}
 
-	function createTextLine (prefix, m) {
+	function prefixWithLocation (location, text, separator = ' ') {
+		if (location.length + separator.length + text.length  <= 160) {
+			return `${location}${separator}${text}`
+		}
+
+		return `${location.substr(0, 160 - separator.length - text.length - 1 /* dot */)}.${separator}${text}`
+	}
+
+	function createTextLineFormat1 (prefix, m) {
 		return `${prefix} rain ${Math.ceil(m.pr)}mm ${m.pp}% temp ${m.t}C wind ${m.wn} ${Math.round(m.ws * 3.6)}kmh hum ${m.rh}%`
 	}
 
-	function prefixWithLocation (location, text) {
-		if (location.length + text.length + 1 /* space */ <= 160) {
-			return `${location} ${text}`
-		}
+	function probability (percentage) {
+		if (percentage <= 0.10) return 'no'
+		if (percentage <= 0.50) return 'small'
+		if (percentage > 0.50) return 'high'
+		return 'unknown'
+	}
 
-		return `${location.substr(0, 160 - text.length - 1 /* space */ - 1 /* dot */)}. ${text}`
+	function intensity (mm) {
+		if (mm <= 0) return 'no'
+		if (mm <= 10) return 'light'
+		if (mm > 10) return 'heavy'
+		return 'unknown'
+	}
+
+	function createTextLineFormat2 (prefix, m) {
+		return `${prefix} ${probability(m.pp)} chance ${intensity(m.pr)} rain.`
 	}
 
 	function sendText (from, to, text, cb) {
@@ -124,7 +143,7 @@ try {
 
 					const data = parse(body)
 					const measurements = _(data).get('root.children.0.children')
-
+					var text
 					const morning   = findMeasurementForDateTime(measurements, date, '06:00')
 					const afternoon = findMeasurementForDateTime(measurements, date, '12:00')
 					const evening   = findMeasurementForDateTime(measurements, date, '18:00')
@@ -135,12 +154,35 @@ try {
 						return done(err)
 					}
 
-					const text = prefixWithLocation(recipient.location, [
-						`${date.format('MMM D')}`,
-						createTextLine('Morn', morning),
-						createTextLine('Aft', afternoon),
-						createTextLine('Eve', evening),
-					].join('\n'))
+					switch (recipient.format) {
+					default:
+					case 1:
+						text = prefixWithLocation(recipient.location, [
+							`${date.format('MMM D')}`,
+							createTextLineFormat1('Morn', morning),
+							createTextLineFormat1('Aft', afternoon),
+							createTextLineFormat1('Eve', evening),
+						].join('\n'))
+						break
+					case 2:
+						// Next day
+						const night = findMeasurementForDateTime(measurements, date.clone().add(1, 'day'), '00:00')
+
+						if ( ! night) {
+							const err = 'Expected next day night measurement.'
+							log.error({ recipient, body }, err)
+							return done(err)
+						}
+
+						text = prefixWithLocation(recipient.location, [
+							`${date.format('MMM D')}`,
+							createTextLineFormat2('Morning', morning),
+							createTextLineFormat2('Afternoon', afternoon),
+							createTextLineFormat2('Evening', evening),
+							createTextLineFormat2('Night', night),
+						].join('\n'))
+						break
+					}
 
 					sendText(recipient.twilio_number, recipient.number, text, done)
 				})
