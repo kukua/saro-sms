@@ -115,7 +115,7 @@ try {
 		log.debug({ type: 'sending', from, to, text }, '')
 
 		twilio.messages.create({
-			from: senderID || from,
+			from,
 			to,
 			body: text,
 		}, (err, result) => {
@@ -163,6 +163,8 @@ try {
 							createTextLineFormat1('Aft', afternoon),
 							createTextLineFormat1('Eve', evening),
 						].join('\n'))
+
+						sendText(senderID, recipient.number, text, done)
 						break
 					case 2:
 						// Next day
@@ -181,10 +183,10 @@ try {
 							createTextLineFormat2('Evening', evening),
 							createTextLineFormat2('Night', night),
 						].join('\n'))
+
+						sendText(recipient.twilio_number, recipient.number, text, done)
 						break
 					}
-
-					sendText(recipient.twilio_number, recipient.number, text, done)
 				})
 			}, i * sendInterval)
 		})
