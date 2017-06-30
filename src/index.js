@@ -143,20 +143,30 @@ try {
 
 					const data = parse(body)
 					const measurements = _(data).get('root.children.0.children')
-					var text
-					const morning   = findMeasurementForDateTime(measurements, date, '06:00')
-					const afternoon = findMeasurementForDateTime(measurements, date, '12:00')
-					const evening   = findMeasurementForDateTime(measurements, date, '18:00')
 
-					if ( ! morning || ! afternoon || ! evening) {
-						const err = 'Expected morning, afternoon and evening measurement.'
-						log.error({ recipient, body }, err)
-						return done(err)
+					function measurementsForDate (date) {
+						var night     = findMeasurementForDateTime(measurements, date, '00:00')
+						var morning   = findMeasurementForDateTime(measurements, date, '06:00')
+						var afternoon = findMeasurementForDateTime(measurements, date, '12:00')
+						var evening   = findMeasurementForDateTime(measurements, date, '18:00')
+
+						if ( ! night || ! morning || ! afternoon || ! evening) {
+							var err = 'Expected night, morning, afternoon and evening measurement.'
+							log.error({ recipient, body }, err)
+							return done(err)
+						}
+
+						return { night, morning, afternoon, evening }
 					}
+
+
+					var night, morning, afternoon, evening, text
 
 					switch (recipient.format) {
 					default:
 					case 1:
+						var { morning, afternoon, evening } = measurementsForDate(date)
+
 						text = prefixWithLocation(recipient.location, [
 							`${date.format('MMM D')}`,
 							createTextLineFormat1('Morn', morning),
@@ -167,21 +177,17 @@ try {
 						sendText(senderID, recipient.number, text, done)
 						break
 					case 2:
-						// Next day
-						const night = findMeasurementForDateTime(measurements, date.clone().add(1, 'day'), '00:00')
+						// For tomorrow
+						date.add(1, 'day')
 
-						if ( ! night) {
-							const err = 'Expected next day night measurement.'
-							log.error({ recipient, body }, err)
-							return done(err)
-						}
+						var { night, morning, afternoon, evening } = measurementsForDate(date)
 
 						text = prefixWithLocation(recipient.location, [
 							`${date.format('MMM D')}`,
+							createTextLineFormat2('Night', night),
 							createTextLineFormat2('Morning', morning),
 							createTextLineFormat2('Afternoon', afternoon),
 							createTextLineFormat2('Evening', evening),
-							createTextLineFormat2('Night', night),
 						].join('\n'))
 
 						sendText(recipient.twilio_number, recipient.number, text, done)
