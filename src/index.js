@@ -73,6 +73,7 @@ try {
 
 	const p = parallel().timeout(4 * 60 * 60 * 1000)
 	const date = moment.utc().startOf('day')
+	const tomorrow = date.clone().add(1, 'day')
 
 	function findMeasurementForDateTime (measurements, date, time = '00:00') {
 		const dateString = date.format('YYYY-MM-DD')
@@ -177,13 +178,10 @@ try {
 						sendText(senderID, recipient.number, text, done)
 						break
 					case 2:
-						// For tomorrow
-						date.add(1, 'day')
-
-						var { night, morning, afternoon, evening } = measurementsForDate(date)
+						var { night, morning, afternoon, evening } = measurementsForDate(tomorrow)
 
 						text = prefixWithLocation(recipient.location, [
-							`${date.format('MMM D')}`,
+							`${tomorrow.format('MMM D')}`,
 							createTextLineFormat2('Night', night),
 							createTextLineFormat2('Morning', morning),
 							createTextLineFormat2('Afternoon', afternoon),
