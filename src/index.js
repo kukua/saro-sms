@@ -140,56 +140,60 @@ try {
 				}, (err, res, body) => {
 					if (err) return error(err)
 
-					log.debug({ type: 'raw', recipient, body })
+					try {
+						log.debug({ type: 'raw', recipient, body })
 
-					const data = parse(body)
-					const measurements = _(data).get('root.children.0.children')
+						const data = parse(body)
+						const measurements = _(data).get('root.children.0.children')
 
-					function measurementsForDate (date) {
-						var night     = findMeasurementForDateTime(measurements, date, '00:00')
-						var morning   = findMeasurementForDateTime(measurements, date, '06:00')
-						var afternoon = findMeasurementForDateTime(measurements, date, '12:00')
-						var evening   = findMeasurementForDateTime(measurements, date, '18:00')
+						function measurementsForDate (date) {
+							var night     = findMeasurementForDateTime(measurements, date, '00:00')
+							var morning   = findMeasurementForDateTime(measurements, date, '06:00')
+							var afternoon = findMeasurementForDateTime(measurements, date, '12:00')
+							var evening   = findMeasurementForDateTime(measurements, date, '18:00')
 
-						if ( ! night || ! morning || ! afternoon || ! evening) {
-							var err = 'Expected night, morning, afternoon and evening measurement.'
-							log.error({ recipient, body }, err)
-							return done(err)
+							if ( ! night || ! morning || ! afternoon || ! evening) {
+								var err = 'Expected night, morning, afternoon and evening measurement.'
+								log.error({ recipient, body }, err)
+								return done(err)
+							}
+
+							return { night, morning, afternoon, evening }
 						}
 
-						return { night, morning, afternoon, evening }
-					}
 
+						var night, morning, afternoon, evening, text
 
-					var night, morning, afternoon, evening, text
+						switch (recipient.format) {
+						default:
+						case 1:
+							var { morning, afternoon, evening } = measurementsForDate(date)
 
-					switch (recipient.format) {
-					default:
-					case 1:
-						var { morning, afternoon, evening } = measurementsForDate(date)
+							text = prefixWithLocation(recipient.location, [
+								`${date.format('MMM D')}`,
+								createTextLineFormat1('Morn', morning),
+								createTextLineFormat1('Aft', afternoon),
+								createTextLineFormat1('Eve', evening),
+							].join('\n'))
 
-						text = prefixWithLocation(recipient.location, [
-							`${date.format('MMM D')}`,
-							createTextLineFormat1('Morn', morning),
-							createTextLineFormat1('Aft', afternoon),
-							createTextLineFormat1('Eve', evening),
-						].join('\n'))
+							sendText(senderID, recipient.number, text, done)
+							break
+						case 2:
+							var { night, morning, afternoon, evening } = measurementsForDate(tomorrow)
 
-						sendText(senderID, recipient.number, text, done)
-						break
-					case 2:
-						var { night, morning, afternoon, evening } = measurementsForDate(tomorrow)
+							text = prefixWithLocation(recipient.location, [
+								`${tomorrow.format('MMM D')}`,
+								createTextLineFormat2('Night', night),
+								createTextLineFormat2('Morning', morning),
+								createTextLineFormat2('Afternoon', afternoon),
+								createTextLineFormat2('Evening', evening),
+							].join('\n'))
 
-						text = prefixWithLocation(recipient.location, [
-							`${tomorrow.format('MMM D')}`,
-							createTextLineFormat2('Night', night),
-							createTextLineFormat2('Morning', morning),
-							createTextLineFormat2('Afternoon', afternoon),
-							createTextLineFormat2('Evening', evening),
-						].join('\n'))
-
-						sendText(recipient.twilio_number, recipient.number, text, done)
-						break
+							sendText(recipient.twilio_number, recipient.number, text, done)
+							break
+						}
+					} catch (err) {
+						done(err)
 					}
 				})
 			}, i * sendInterval)
