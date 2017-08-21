@@ -77,7 +77,7 @@ try {
 
 	function findMeasurementForDateTime (measurements, date, time = '00:00') {
 		const dateString = date.format('YYYY-MM-DD')
-		const measurement = _.find(measurements, (child) => child.attributes.dt === `${dateString} ${time}`)
+		const measurement = _.find(measurements, (child) => child.name === 'fc' && child.attributes.dt === `${dateString} ${time}`)
 
 		if (measurement) return measurement.attributes
 	}
