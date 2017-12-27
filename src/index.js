@@ -11,17 +11,18 @@ import i18next from "i18next";
 
 require( "dotenv" ).config();
 
+const englishTrans = require( path.resolve( "locales/en" ) );
+const swahilliTrans = require( path.resolve( "locales/sw" ) );
 const sendersList = require( path.resolve( process.env.SENDERS_DB_PATH ) );
 const recipientsList = require( path.resolve( process.env.RECIPIENTS_DB_PATH ) );
+
 const twilio = new Twilio( process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN );
 const senderID = String( process.env.SENDER_ID || "" );
 const sendInterval = Number( process.env.SEND_INTERVAL_MS ) || 30000;
 const p = parallel().timeout( 4 * 60 * 60 * 1000 );
+
 const today = moment.utc().startOf( "day" );
 const tomorrow = today.clone().add( 1, "day" );
-
-const englishTrans = require( `${ __dirname }/locales/en` );
-const swahilliTrans = require( `${ __dirname }/locales/sw` );
 
 const log = Bunyan.createLogger( {
     name: "saro-sms",
