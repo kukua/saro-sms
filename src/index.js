@@ -84,6 +84,10 @@ function createTextLineFormat2( prefix, m ) {
     return `${ prefix } ${ probability( m.pp ) } chance ${ intensity( m.pr ) } rain.`;
 }
 
+function createTextLineFormat3( prefix, m ) {
+    return `${ prefix } ${ Math.ceil( m.pr ) }mm ${ m.pp }% ${ m.t }C`;
+}
+
 function sendText( from, to, text, cb ) {
     log.debug( {
         type: "sending", from, to, text,
@@ -121,6 +125,29 @@ function measurementsForDate( date, body, recipient, callback ) {
     };
 }
 
+function getFTimes( format ) {
+    if ( format === 1 || format === 2 ) {
+        return "&ftimes=72/6h/-24";
+    }
+
+    return "&ftimes=96/12h/-24";
+}
+
+function getRangeOfDates( startDate, endDate ) {
+    const dates = [ startDate ];
+
+    const currDate = moment( startDate ).startOf( "day" );
+    const lastDate = moment( endDate ).startOf( "day" );
+
+    while ( currDate.add( 1, "days" ).diff( lastDate ) < 0 ) {
+        dates.push( currDate.clone() );
+    }
+
+    dates.push( endDate );
+
+    return dates;
+}
+
 try {
     const validNumber = /^\+[0-9]{11,13}$/;
 
@@ -156,7 +183,7 @@ try {
     recipients.forEach( ( recipient, i ) => {
         p.add( ( done ) => {
             setTimeout( () => {
-                const url = `${ process.env.NAVIFEED_URL }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
+                const url = `${ process.env.NAVIFEED_URL }${ getFTimes( recipient.format ) }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
 
                 request( {
                     method: "GET",
@@ -191,6 +218,30 @@ try {
                                 createTextLineFormat2( "Afternoon", afternoon ),
                                 createTextLineFormat2( "Evening", evening ),
                             ].join( "\n" ) );
+
+                            sendText( recipient.twilioNumber, recipient.number, text, done );
+                        } else if ( recipient.format === 3 ) {
+                            const data = parse( body );
+                            const measurements = _( data ).get( "root.children.0.children" );
+                            const toDate = today.clone().add( 3, "day" );
+
+                            const range = getRangeOfDates( today, toDate );
+                            let text = "";
+
+                            range.forEach( ( date ) => {
+                                const night = findMeasurementForDateTime( measurements, date, "00:00" );
+                                const afternoon = findMeasurementForDateTime( measurements, date, "12:00" );
+
+                                const newText = [
+                                    `${ date.format( "dddd" ) }`,
+                                    createTextLineFormat3( "Afternoon", afternoon ),
+                                    `Night ${ night.t }C`,
+                                ].join( "\n" );
+
+                                text = `${ text } ${ newText }\n`;
+                            } );
+
+                            text = `${ recipient.location },${ text }`;
 
                             sendText( recipient.twilioNumber, recipient.number, text, done );
                         }
