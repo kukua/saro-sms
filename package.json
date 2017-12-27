@@ -34,7 +34,7 @@
     "bunyan": "^1.8.10",
     "bunyan-debug-stream": "^1.0.8",
     "dotenv": "^4.0.0",
-    "i18n": "^0.8.3",
+    "i18next": "^10.2.1",
     "lodash": "^4.17.4",
     "moment-timezone": "^0.5.13",
     "node-parallel": "^0.1.6",

@@ -7,6 +7,7 @@ import request from "request";
 import moment from "moment-timezone";
 import parse from "xml-parser";
 import Twilio from "twilio";
+import i18next from "i18next";
 
 require( "dotenv" ).config();
 
@@ -18,6 +19,9 @@ const sendInterval = Number( process.env.SEND_INTERVAL_MS ) || 30000;
 const p = parallel().timeout( 4 * 60 * 60 * 1000 );
 const today = moment.utc().startOf( "day" );
 const tomorrow = today.clone().add( 1, "day" );
+
+const englishTrans = require( `${ __dirname }/locales/en` );
+const swahilliTrans = require( `${ __dirname }/locales/sw` );
 
 const log = Bunyan.createLogger( {
     name: "saro-sms",
@@ -39,6 +43,19 @@ const log = Bunyan.createLogger( {
 } );
 
 log.level( "debug" );
+
+i18next.init( {
+    lng: "en",
+    debug: false,
+    resources: {
+        en: {
+            translation: englishTrans,
+        },
+        sw: {
+            translation: swahilliTrans,
+        },
+    },
+} );
 
 function error( ...args ) {
     log.error( ...args );
@@ -148,6 +165,35 @@ function getRangeOfDates( startDate, endDate ) {
     return dates;
 }
 
+function getFourDayForecast( body, recipient ) {
+    const data = parse( body );
+    const measurements = _( data ).get( "root.children.0.children" );
+    const toDate = today.clone().add( 3, "day" );
+    const range = getRangeOfDates( today, toDate );
+    let text = "";
+
+    // set locale
+    i18next.changeLanguage( recipient.language );
+
+    range.forEach( ( date ) => {
+        const night = findMeasurementForDateTime( measurements, date, "00:00" );
+        const afternoon = findMeasurementForDateTime( measurements, date, "12:00" );
+        const dateText = `${ date.format( "dddd" ) }`;
+        const dateTextTranslated = i18next.t( dateText );
+
+        const newText = [
+            dateTextTranslated,
+            createTextLineFormat3( i18next.t( "Afternoon" ), afternoon ),
+            `${ i18next.t( "Night" ) } ${ night.t }C`,
+        ].join( "\n" );
+
+        text = `${ text } ${ newText }\n`;
+    } );
+
+    text = `${ recipient.location },${ text }`;
+    return text;
+}
+
 try {
     const validNumber = /^\+[0-9]{11,13}$/;
 
@@ -171,6 +217,7 @@ try {
         if ( !twilioNumber ) return error( { recipient }, "Invalid recipient Twilio number." );
 
         newRecipient.name = ( recipient.name || "Unnamed" ).toUpperCase().trim();
+        newRecipient.language = ( recipient.language || "en" ).trim();
         newRecipient.location = recipient.location.toUpperCase().trim();
         newRecipient.twilioNumber = twilioNumber;
         newRecipient.format = ( typeof recipient.format === "number" ? recipient.format : 1 );
@@ -221,27 +268,7 @@ try {
 
                             sendText( recipient.twilioNumber, recipient.number, text, done );
                         } else if ( recipient.format === 3 ) {
-                            const data = parse( body );
-                            const measurements = _( data ).get( "root.children.0.children" );
-                            const toDate = today.clone().add( 3, "day" );
-
-                            const range = getRangeOfDates( today, toDate );
-                            let text = "";
-
-                            range.forEach( ( date ) => {
-                                const night = findMeasurementForDateTime( measurements, date, "00:00" );
-                                const afternoon = findMeasurementForDateTime( measurements, date, "12:00" );
-
-                                const newText = [
-                                    `${ date.format( "dddd" ) }`,
-                                    createTextLineFormat3( "Afternoon", afternoon ),
-                                    `Night ${ night.t }C`,
-                                ].join( "\n" );
-
-                                text = `${ text } ${ newText }\n`;
-                            } );
-
-                            text = `${ recipient.location },${ text }`;
+                            const text = getFourDayForecast( body, recipient );
 
                             sendText( recipient.twilioNumber, recipient.number, text, done );
                         }

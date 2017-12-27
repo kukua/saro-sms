@@ -26,9 +26,11 @@
     // make it meaningful
     "prefer-const": 1,
 
-    "max-len": [ 2, 170 ]
+    "max-len": [ 2, 170 ],
 
     // keep it simple
     // "complexity": [ 1, 5 ]
+
+    "no-underscore-dangle": 0
   }
 }
