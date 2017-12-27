@@ -1,209 +1,211 @@
-import path from 'path'
-import _ from 'lodash'
-import Bunyan from 'bunyan'
-import bunyanDebugStream from 'bunyan-debug-stream'
-import parallel from 'node-parallel'
-import request from 'request'
-import moment from 'moment-timezone'
-import parse from 'xml-parser'
-import Twilio from 'twilio'
+import path from "path";
+import _ from "lodash";
+import Bunyan from "bunyan";
+import bunyanDebugStream from "bunyan-debug-stream";
+import parallel from "node-parallel";
+import request from "request";
+import moment from "moment-timezone";
+import parse from "xml-parser";
+import Twilio from "twilio";
 
-require('dotenv').config()
+require( "dotenv" ).config();
 
-const log = Bunyan.createLogger({
-	name: 'saro-sms',
-	streams: [
-		{
-			level: 'info',
-			type: 'raw',
-			stream: bunyanDebugStream({
-				basepath: path.resolve('.'),
-				forceColor: true,
-			}),
-		},
-		{
-			level: 'debug',
-			type: 'file',
-			path: process.env.LOG_PATH,
-		},
-	]
-})
+const sendersList = require( path.resolve( process.env.SENDERS_DB_PATH ) );
+const recipientsList = require( path.resolve( process.env.RECIPIENTS_DB_PATH ) );
+const twilio = new Twilio( process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN );
+const senderID = String( process.env.SENDER_ID || "" );
+const sendInterval = Number( process.env.SEND_INTERVAL_MS ) || 30000;
+const p = parallel().timeout( 4 * 60 * 60 * 1000 );
+const today = moment.utc().startOf( "day" );
+const tomorrow = today.clone().add( 1, "day" );
 
-log.level('debug')
+const log = Bunyan.createLogger( {
+    name: "saro-sms",
+    streams: [
+        {
+            level: "info",
+            type: "raw",
+            stream: bunyanDebugStream( {
+                basepath: path.resolve( "." ),
+                forceColor: true,
+            } ),
+        },
+        {
+            level: "debug",
+            type: "file",
+            path: process.env.LOG_PATH,
+        },
+    ],
+} );
 
-const twilio = new Twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
-const senderID = String(process.env.SENDER_ID || '')
-const sendInterval = Number(process.env.SEND_INTERVAL_MS) || 30000
+log.level( "debug" );
 
-function error (...args) {
-	log.error(...args)
-	process.exit(1)
+function error( ...args ) {
+    log.error( ...args );
+    process.exit( 1 );
+}
+
+function findMeasurementForDateTime( measurements, date, time = "00:00" ) {
+    const dateString = date.format( "YYYY-MM-DD" );
+    const measurement = _.find( measurements, child => child.name === "fc" && child.attributes.dt === `${ dateString } ${ time }` );
+
+    if ( measurement ) return measurement.attributes;
+
+    return null;
+}
+
+function prefixWithLocation( location, text, separator = " " ) {
+    if ( location.length + separator.length + text.length <= 160 ) {
+        return `${ location }${ separator }${ text }`;
+    }
+
+    return `${ location.substr( 0, 160 - separator.length - text.length - 1 /* dot */ ) }.${ separator }${ text }`;
+}
+
+function createTextLineFormat1( prefix, m ) {
+    return `${ prefix } rain ${ Math.ceil( m.pr ) }mm ${ m.pp }% temp ${ m.t }C wind ${ m.wn } ${ Math.round( m.ws * 3.6 ) }kmh hum ${ m.rh }%`;
+}
+
+function probability( percentage ) {
+    if ( percentage <= 0.10 ) return "no";
+    if ( percentage <= 0.50 ) return "small";
+    if ( percentage > 0.50 ) return "high";
+    return "unknown";
+}
+
+function intensity( mm ) {
+    if ( mm <= 0 ) return "no";
+    if ( mm <= 10 ) return "light";
+    if ( mm > 10 ) return "heavy";
+    return "unknown";
+}
+
+function createTextLineFormat2( prefix, m ) {
+    return `${ prefix } ${ probability( m.pp ) } chance ${ intensity( m.pr ) } rain.`;
+}
+
+function sendText( from, to, text, cb ) {
+    log.debug( {
+        type: "sending", from, to, text,
+    }, "" );
+
+    twilio.messages.create( {
+        from,
+        to,
+        body: text,
+    }, ( err, result ) => {
+        const sid = ( result ? result.sid : null );
+        log.debug( {
+            type: "sent", to, success: !err, sid,
+        }, ( err && err.message ) || "" );
+        cb( err );
+    } );
+}
+
+function measurementsForDate( date, body, recipient, callback ) {
+    const data = parse( body );
+    const measurements = _( data ).get( "root.children.0.children" );
+    const night = findMeasurementForDateTime( measurements, date, "00:00" );
+    const morning = findMeasurementForDateTime( measurements, date, "06:00" );
+    const afternoon = findMeasurementForDateTime( measurements, date, "12:00" );
+    const evening = findMeasurementForDateTime( measurements, date, "18:00" );
+
+    if ( !night || !morning || !afternoon || !evening ) {
+        const err = "Expected night, morning, afternoon and evening measurement.";
+        log.error( { recipient, body }, err );
+        return callback( err );
+    }
+
+    return {
+        night, morning, afternoon, evening,
+    };
 }
 
 try {
-	const sendersFile = path.resolve(process.env.SENDERS_DB_PATH)
-	const recipientsFile = path.resolve(process.env.RECIPIENTS_DB_PATH)
-	const senders = require(sendersFile)
-	var recipients = require(recipientsFile)
-	const validNumber = /^\+[0-9]{11,13}$/
+    const validNumber = /^\+[0-9]{11,13}$/;
 
-	senders.forEach((number) => {
-		if ( ! number.match(validNumber)) return error({ number }, 'Invalid sender Twilio number.')
-	})
+    sendersList.forEach( ( number ) => {
+        if ( !number.match( validNumber ) ) {
+            return error( { number }, "Invalid sender Twilio number." );
+        }
+        return true;
+    } );
 
-	recipients = recipients.map((recipient, i) => {
-		// Note: recipient.name is optional
-		if ( ! recipient.location) return error({ recipient }, 'Missing recipient location.')
-		if ( ! recipient.number) return error({ recipient }, 'Missing recipient number.')
-		if ( ! recipient.latitude) return error({ recipient }, 'Missing recipient latitude.')
-		if ( ! recipient.longitude) return error({ recipient }, 'Missing recipient longitude.')
+    const recipients = recipientsList.map( ( recipient, i ) => {
+        const newRecipient = recipient;
+        const twilioNumber = sendersList[ i % sendersList.length ];
 
-		recipient.name = (recipient.name || 'Unnamed').toUpperCase().trim()
-		recipient.location = recipient.location.toUpperCase().trim()
-		recipient.twilio_number = senders[i % senders.length]
-		recipient.format = (typeof recipient.format === 'number' ? recipient.format : 1)
+        // Do validation, Note: recipient.name is optional
+        if ( !recipient.location ) return error( { recipient }, "Missing recipient location." );
+        if ( !recipient.number ) return error( { recipient }, "Missing recipient number." );
+        if ( !recipient.latitude ) return error( { recipient }, "Missing recipient latitude." );
+        if ( !recipient.longitude ) return error( { recipient }, "Missing recipient longitude." );
+        if ( !recipient.number.match( validNumber ) ) return error( { recipient }, "Invalid recipient number." );
+        if ( !twilioNumber ) return error( { recipient }, "Invalid recipient Twilio number." );
 
-		if ( ! recipient.number.match(validNumber)) return error({ recipient }, 'Invalid recipient number.')
-		if ( ! recipient.twilio_number) return error({ recipient }, 'Invalid recipient Twilio number.')
+        newRecipient.name = ( recipient.name || "Unnamed" ).toUpperCase().trim();
+        newRecipient.location = recipient.location.toUpperCase().trim();
+        newRecipient.twilioNumber = twilioNumber;
+        newRecipient.format = ( typeof recipient.format === "number" ? recipient.format : 1 );
 
-		return recipient
-	})
+        return newRecipient;
+    } );
 
-	//console.log(senders, recipients); process.exit(1)
+    // console.log(senders, recipients); process.exit(1)
 
-	const p = parallel().timeout(4 * 60 * 60 * 1000)
-	const date = moment.utc().startOf('day')
-	const tomorrow = date.clone().add(1, 'day')
+    recipients.forEach( ( recipient, i ) => {
+        p.add( ( done ) => {
+            setTimeout( () => {
+                const url = `${ process.env.NAVIFEED_URL }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
 
-	function findMeasurementForDateTime (measurements, date, time = '00:00') {
-		const dateString = date.format('YYYY-MM-DD')
-		const measurement = _.find(measurements, (child) => child.name === 'fc' && child.attributes.dt === `${dateString} ${time}`)
+                request( {
+                    method: "GET",
+                    url,
+                    headers: {
+                        Accept: "text/xml",
+                    },
+                }, ( err, res, body ) => {
+                    if ( err ) return error( err );
 
-		if (measurement) return measurement.attributes
-	}
+                    try {
+                        log.debug( { type: "raw", recipient, body } );
 
-	function prefixWithLocation (location, text, separator = ' ') {
-		if (location.length + separator.length + text.length  <= 160) {
-			return `${location}${separator}${text}`
-		}
+                        if ( recipient.format === 1 ) {
+                            const { morning, afternoon, evening } = measurementsForDate( today, body, recipient, done );
 
-		return `${location.substr(0, 160 - separator.length - text.length - 1 /* dot */)}.${separator}${text}`
-	}
+                            const text = prefixWithLocation( recipient.location, [
+                                `${ today.format( "MMM D" ) }`,
+                                createTextLineFormat1( "Morn", morning ),
+                                createTextLineFormat1( "Aft", afternoon ),
+                                createTextLineFormat1( "Eve", evening ),
+                            ].join( "\n" ) );
 
-	function createTextLineFormat1 (prefix, m) {
-		return `${prefix} rain ${Math.ceil(m.pr)}mm ${m.pp}% temp ${m.t}C wind ${m.wn} ${Math.round(m.ws * 3.6)}kmh hum ${m.rh}%`
-	}
+                            sendText( senderID, recipient.number, text, done );
+                        } else if ( recipient.format === 2 ) {
+                            const { night, morning, afternoon, evening } = measurementsForDate( tomorrow, body, recipient, done );
 
-	function probability (percentage) {
-		if (percentage <= 0.10) return 'no'
-		if (percentage <= 0.50) return 'small'
-		if (percentage > 0.50) return 'high'
-		return 'unknown'
-	}
+                            const text = prefixWithLocation( recipient.location, [
+                                `${ tomorrow.format( "MMM D" ) }`,
+                                createTextLineFormat2( "Night", night ),
+                                createTextLineFormat2( "Morning", morning ),
+                                createTextLineFormat2( "Afternoon", afternoon ),
+                                createTextLineFormat2( "Evening", evening ),
+                            ].join( "\n" ) );
 
-	function intensity (mm) {
-		if (mm <= 0) return 'no'
-		if (mm <= 10) return 'light'
-		if (mm > 10) return 'heavy'
-		return 'unknown'
-	}
+                            sendText( recipient.twilioNumber, recipient.number, text, done );
+                        }
+                    } catch ( e ) {
+                        done( e );
+                    }
+                } );
+            }, i * sendInterval );
+        } );
+    } );
 
-	function createTextLineFormat2 (prefix, m) {
-		return `${prefix} ${probability(m.pp)} chance ${intensity(m.pr)} rain.`
-	}
-
-	function sendText (from, to, text, cb) {
-		log.debug({ type: 'sending', from, to, text }, '')
-
-		twilio.messages.create({
-			from,
-			to,
-			body: text,
-		}, (err, result) => {
-			const sid = (result ? result.sid : null)
-			log.debug({ type: 'sent', to, success: ! err, sid }, err && err.message || '')
-			cb(err)
-		})
-	}
-
-	recipients.forEach((recipient, i) => {
-		p.add((done) => {
-			setTimeout(() => {
-				const url = `${process.env.NAVIFEED_URL}&lat=${recipient.latitude}&lon=${recipient.longitude}`
-
-				request({
-					method: 'GET',
-					url,
-					headers: {
-						'Accept': 'text/xml',
-					},
-				}, (err, res, body) => {
-					if (err) return error(err)
-
-					try {
-						log.debug({ type: 'raw', recipient, body })
-
-						const data = parse(body)
-						const measurements = _(data).get('root.children.0.children')
-
-						function measurementsForDate (date) {
-							var night     = findMeasurementForDateTime(measurements, date, '00:00')
-							var morning   = findMeasurementForDateTime(measurements, date, '06:00')
-							var afternoon = findMeasurementForDateTime(measurements, date, '12:00')
-							var evening   = findMeasurementForDateTime(measurements, date, '18:00')
-
-							if ( ! night || ! morning || ! afternoon || ! evening) {
-								var err = 'Expected night, morning, afternoon and evening measurement.'
-								log.error({ recipient, body }, err)
-								return done(err)
-							}
-
-							return { night, morning, afternoon, evening }
-						}
-
-
-						var night, morning, afternoon, evening, text
-
-						switch (recipient.format) {
-						default:
-						case 1:
-							var { morning, afternoon, evening } = measurementsForDate(date)
-
-							text = prefixWithLocation(recipient.location, [
-								`${date.format('MMM D')}`,
-								createTextLineFormat1('Morn', morning),
-								createTextLineFormat1('Aft', afternoon),
-								createTextLineFormat1('Eve', evening),
-							].join('\n'))
-
-							sendText(senderID, recipient.number, text, done)
-							break
-						case 2:
-							var { night, morning, afternoon, evening } = measurementsForDate(tomorrow)
-
-							text = prefixWithLocation(recipient.location, [
-								`${tomorrow.format('MMM D')}`,
-								createTextLineFormat2('Night', night),
-								createTextLineFormat2('Morning', morning),
-								createTextLineFormat2('Afternoon', afternoon),
-								createTextLineFormat2('Evening', evening),
-							].join('\n'))
-
-							sendText(recipient.twilio_number, recipient.number, text, done)
-							break
-						}
-					} catch (err) {
-						done(err)
-					}
-				})
-			}, i * sendInterval)
-		})
-	})
-
-	p.done((err) => {
-		if (err) return error(err)
-		log.info('Done.')
-	})
-} catch (err) {
-	error(err)
+    p.done( ( err ) => {
+        if ( err ) return error( err );
+        log.info( "Done." );
+    } );
+} catch ( err ) {
+    error( err );
 }
