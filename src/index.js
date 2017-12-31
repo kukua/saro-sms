@@ -196,11 +196,10 @@ function getFourDayForecast( body, recipient ) {
     return text;
 }
 
-// eslint-disable-next-line no-unused-vars
 function sendDailyForecast() {
     sendForeCast( recipientsDailyForcastList );
 }
-// eslint-disable-next-line no-unused-vars
+
 function sendFourDayForecast() {
     sendForeCast( recipientsFourDayCastList );
 }
@@ -300,3 +299,12 @@ function sendForeCast( recipientsList ) {
         error( err );
     }
 }
+
+// get request to handle send SMS via process.argv
+process.argv.forEach( ( val ) => {
+    if ( val === "daily" ) {
+        sendDailyForecast();
+    } else if ( val === "fourday" ) {
+        sendFourDayForecast();
+    }
+} );
