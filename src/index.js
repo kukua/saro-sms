@@ -14,8 +14,8 @@ require( "dotenv" ).config();
 const englishTrans = require( path.resolve( "locales/en" ) );
 const swahilliTrans = require( path.resolve( "locales/sw" ) );
 const sendersList = require( path.resolve( process.env.SENDERS_DB_PATH ) );
-const recipientsDailyForcastList = require( path.resolve( process.env.RECIPIENTS_DAILY_DB_PATH ) );
-const recipientsFourDayCastList = require( path.resolve( process.env.RECIPIENTS_FOUR_DAY_DB_PATH ) );
+const recipientsDailyForecastList = require( path.resolve( process.env.RECIPIENTS_DAILY_DB_PATH ) );
+const recipientsFourDayForeCastList = require( path.resolve( process.env.RECIPIENTS_FOUR_DAY_DB_PATH ) );
 
 const twilio = new Twilio( process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN );
 const senderID = String( process.env.SENDER_ID || "" );
@@ -105,6 +105,10 @@ function createTextLineFormat2( prefix, m ) {
 
 function createTextLineFormat3( prefix, m ) {
     return `${ prefix } ${ Math.ceil( m.pr ) }mm ${ m.pp }% ${ m.t }C`;
+}
+
+function createTextLineFormat4( prefix ) {
+    return `You receive messages for ${ prefix } containing rain total and likelihood, high and low temp. If these are incorrect or inaccurate please message 0758659166`;
 }
 
 function sendText( from, to, text, cb ) {
@@ -197,14 +201,20 @@ function getFourDayForecast( body, recipient ) {
 }
 
 function sendDailyForecast() {
-    sendForeCast( recipientsDailyForcastList );
+    sendForeCast( recipientsDailyForecastList );
 }
 
 function sendFourDayForecast() {
-    sendForeCast( recipientsFourDayCastList );
+    sendForeCast( recipientsFourDayForeCastList );
 }
 
-function sendForeCast( recipientsList ) {
+function sendMonthlyMemo() {
+    const recipientsForecastList = recipientsDailyForecastList.concat( recipientsFourDayForeCastList );
+
+    sendForeCast( recipientsForecastList, false );
+}
+
+function sendForeCast( recipientsList, isNotMonthly = true ) {
     try {
         const validNumber = /^\+[0-9]{11,13}$/;
 
@@ -241,52 +251,58 @@ function sendForeCast( recipientsList ) {
         recipients.forEach( ( recipient, i ) => {
             p.add( ( done ) => {
                 setTimeout( () => {
-                    const url = `${ process.env.NAVIFEED_URL }${ getFTimes( recipient.format ) }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
+                    if ( isNotMonthly ) {
+                        const url = `${ process.env.NAVIFEED_URL }${ getFTimes( recipient.format ) }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
 
-                    request( {
-                        method: "GET",
-                        url,
-                        headers: {
-                            Accept: "text/xml",
-                        },
-                    }, ( err, res, body ) => {
-                        if ( err ) return error( err );
+                        request( {
+                            method: "GET",
+                            url,
+                            headers: {
+                                Accept: "text/xml",
+                            },
+                        }, ( err, res, body ) => {
+                            if ( err ) return error( err );
 
-                        try {
-                            log.debug( { type: "raw", recipient, body } );
+                            try {
+                                log.debug( { type: "raw", recipient, body } );
 
-                            if ( recipient.format === 1 ) {
-                                const { morning, afternoon, evening } = measurementsForDate( today, body, recipient, done );
+                                if ( recipient.format === 1 ) {
+                                    const { morning, afternoon, evening } = measurementsForDate( today, body, recipient, done );
 
-                                const text = prefixWithLocation( recipient.location, [
-                                    `${ today.format( "MMM D" ) }`,
-                                    createTextLineFormat1( "Morn", morning ),
-                                    createTextLineFormat1( "Aft", afternoon ),
-                                    createTextLineFormat1( "Eve", evening ),
-                                ].join( "\n" ) );
+                                    const text = prefixWithLocation( recipient.location, [
+                                        `${ today.format( "MMM D" ) }`,
+                                        createTextLineFormat1( "Morn", morning ),
+                                        createTextLineFormat1( "Aft", afternoon ),
+                                        createTextLineFormat1( "Eve", evening ),
+                                    ].join( "\n" ) );
 
-                                sendText( senderID, recipient.number, text, done );
-                            } else if ( recipient.format === 2 ) {
-                                const { night, morning, afternoon, evening } = measurementsForDate( tomorrow, body, recipient, done );
+                                    sendText( senderID, recipient.number, text, done );
+                                } else if ( recipient.format === 2 ) {
+                                    const { night, morning, afternoon, evening } = measurementsForDate( tomorrow, body, recipient, done );
 
-                                const text = prefixWithLocation( recipient.location, [
-                                    `${ tomorrow.format( "MMM D" ) }`,
-                                    createTextLineFormat2( "Night", night ),
-                                    createTextLineFormat2( "Morning", morning ),
-                                    createTextLineFormat2( "Afternoon", afternoon ),
-                                    createTextLineFormat2( "Evening", evening ),
-                                ].join( "\n" ) );
+                                    const text = prefixWithLocation( recipient.location, [
+                                        `${ tomorrow.format( "MMM D" ) }`,
+                                        createTextLineFormat2( "Night", night ),
+                                        createTextLineFormat2( "Morning", morning ),
+                                        createTextLineFormat2( "Afternoon", afternoon ),
+                                        createTextLineFormat2( "Evening", evening ),
+                                    ].join( "\n" ) );
 
-                                sendText( recipient.twilioNumber, recipient.number, text, done );
-                            } else if ( recipient.format === 3 ) {
-                                const text = getFourDayForecast( body, recipient );
+                                    sendText( recipient.twilioNumber, recipient.number, text, done );
+                                } else if ( recipient.format === 3 ) {
+                                    const text = getFourDayForecast( body, recipient );
 
-                                sendText( recipient.twilioNumber, recipient.number, text, done );
+                                    sendText( recipient.twilioNumber, recipient.number, text, done );
+                                }
+                            } catch ( e ) {
+                                done( e );
                             }
-                        } catch ( e ) {
-                            done( e );
-                        }
-                    } );
+                        } );
+                    } else {
+                        const text = createTextLineFormat4( recipient.location );
+
+                        sendText( recipient.twilioNumber, recipient.number, text, done );
+                    }
                 }, i * sendInterval );
             } );
         } );
@@ -306,5 +322,7 @@ process.argv.forEach( ( val ) => {
         sendDailyForecast();
     } else if ( val === "fourday" ) {
         sendFourDayForecast();
+    } else if ( val === "monthly" ) {
+        sendMonthlyMemo();
     }
 } );
