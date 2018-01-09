@@ -6,6 +6,8 @@
   "main": "index.js",
   "scripts": {
     "start": "babel-node src/index.js",
+    "start:daily": "babel-node src/index.js daily",
+    "start:fourday": "babel-node src/index.js fourday",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "./node_modules/.bin/eslint -c .eslintrc.json '**/*.js' excludedFiles '**/node_modules/**'",
     "lint:fix": "npm run lint --fix"
