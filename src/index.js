@@ -153,7 +153,7 @@ function getFTimes( format ) {
         return "&ftimes=72/6h/-24";
     }
 
-    return "&ftimes=96/12h/-24";
+    return "&ftimes=96/12h/-12";
 }
 
 function getRangeOfDates( startDate, endDate ) {
