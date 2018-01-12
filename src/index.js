@@ -103,8 +103,8 @@ function createTextLineFormat2( prefix, m ) {
     return `${ prefix } ${ probability( m.pp ) } chance ${ intensity( m.pr ) } rain.`;
 }
 
-function createTextLineFormat3( prefix, m ) {
-    return `${ prefix } ${ Math.ceil( m.pr ) }mm ${ m.pp }% ${ m.t }C`;
+function createTextLineFormat3( afternoon, night ) {
+    return `${ Math.ceil( ( afternoon.pr + night.pr ) / 2 ) }mm ${ ( afternoon.pp + afternoon.pp ) / 2 }%`;
 }
 
 function createTextLineFormat4( prefix ) {
@@ -189,8 +189,7 @@ function getFourDayForecast( body, recipient ) {
 
         const newText = [
             dateTextTranslated,
-            createTextLineFormat3( i18next.t( "Afternoon" ), afternoon ),
-            `${ i18next.t( "Night" ) } ${ night.t }C`,
+            `${ createTextLineFormat3( afternoon, night ) } ${ i18next.t( "Afternoon" ) } ${ afternoon.t }C ${ i18next.t( "Night" ) } ${ night.t }C`,
         ].join( "\n" );
 
         text = `${ text } ${ newText }\n`;
