@@ -104,7 +104,7 @@ function createTextLineFormat2( prefix, m ) {
 }
 
 function createTextLineFormat3( afternoon, night ) {
-    return `${ Math.ceil( ( ( afternoon.pr + night.pr ) / 2 ) ) }mm ${ ( afternoon.pp + night.pp ) / 2 }%`;
+    return `${ ( Math.ceil( afternoon.pr ) + Math.ceil( night.pr ) ) / 2 }mm ${ ( Math.ceil( afternoon.pp ) + Math.ceil( night.pp ) ) / 2 }%`;
 }
 
 function createTextLineFormat4( prefix ) {
