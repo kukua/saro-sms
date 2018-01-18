@@ -190,9 +190,9 @@ function getFourDayForecast( body, recipient ) {
         const newText = [
             dateTextTranslated,
             `${ createTextLineFormat3( afternoon, night ) } ${ i18next.t( "Afternoon" ) } ${ afternoon.t }C ${ i18next.t( "Night" ) } ${ night.t }C`,
-        ].join( "\n" );
+        ].join( ":" );
 
-        text = `${ text } ${ newText }\n`;
+        text = `${ text } ${ newText }`;
     } );
 
     text = `${ recipient.location },${ text }`;
