@@ -108,7 +108,7 @@ function createTextLineFormat3( afternoon, night ) {
 }
 
 function createTextLineFormat4( prefix ) {
-    return `You receive messages for ${ prefix } containing rain total and likelihood, high and low temp. If these are incorrect or inaccurate please message 0758659166`;
+    return `Unapokea ujumbe wa ${ prefix } ambalo lina mvua na uwezekano, joto la juu na la chini. Ikiwa haya si sahihi tafadhali ujumbe 0758659166`;
 }
 
 function sendText( from, to, text, cb ) {
@@ -181,16 +181,24 @@ function getFourDayForecast( body, recipient ) {
     // set locale
     i18next.changeLanguage( recipient.language );
 
-    range.forEach( ( date ) => {
+    range.forEach( ( date, index ) => {
         const night = findMeasurementForDateTime( measurements, date, "00:00" );
         const afternoon = findMeasurementForDateTime( measurements, date, "12:00" );
         const dateText = `${ date.format( "dddd" ) }`;
         const dateTextTranslated = i18next.t( dateText );
+        let newText = "";
 
-        const newText = [
-            dateTextTranslated,
-            `${ createTextLineFormat3( afternoon, night ) } ${ i18next.t( "Afternoon" ) } ${ afternoon.t }C ${ i18next.t( "Night" ) } ${ night.t }C`,
-        ].join( ":" );
+        if ( index < 1 ) {
+            newText = [
+                dateTextTranslated,
+                `${ createTextLineFormat3( afternoon, night ) } ${ i18next.t( "Afternoon" ) } ${ afternoon.t }C ${ i18next.t( "Night" ) } ${ night.t }C`,
+            ].join( ":" );
+        } else {
+            newText = [
+                dateTextTranslated,
+                `${ createTextLineFormat3( afternoon, night ) } ${ afternoon.t }C ${ night.t }C`,
+            ].join( ":" );
+        }
 
         text = `${ text } ${ newText }`;
     } );
