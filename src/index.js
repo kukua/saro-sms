@@ -16,7 +16,7 @@ const swahilliTrans = require( path.resolve( "locales/sw" ) );
 const sendersList = require( path.resolve( process.env.SENDERS_DB_PATH ) );
 const recipientsDailyForecastList = require( path.resolve( process.env.RECIPIENTS_DAILY_DB_PATH ) );
 const recipientsFourDayForeCastList = require( path.resolve( process.env.RECIPIENTS_FOUR_DAY_DB_PATH ) );
-const recipientsOlamFarmesForeCastList = require( path.resolve( process.env.RECIPIENTS_OLAM_FARMERS_DB_PATH ) );
+const recipientsDailyMemoList = require( path.resolve( process.env.RECIPIENTS_DAILY_MEMO_DB_PATH ) );
 
 const twilio = new Twilio( process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN );
 const senderID = String( process.env.SENDER_ID || "" );
@@ -110,6 +110,10 @@ function createTextLineFormat3( afternoon, night ) {
 
 function createTextLineFormat4( prefix ) {
     return `Unapokea ujumbe kutoka Olam, wa ${ prefix } ambalo lina mvua na uwezekano, joto la juu na la chini. Ikiwa haya si sahihi tafadhali ujumbe ${ process.env.OLAM_FARMERS_NUMBER }`;
+}
+
+function createTextLineFormat5() {
+    return "Ujumbe huu unatoka kwa Olam. Toa magugu yazungukayo mita moja kutoka kwenye mti. Jumuisho la mvua kuanzia 1st Januari hadi sasa ni zaidi ya 50mm.";
 }
 
 function sendText( from, to, text, cb ) {
@@ -222,58 +226,7 @@ function sendMonthlyMemo() {
     sendForeCast( recipientsForecastList, false );
 }
 
-function sendSMSInParallel( recipients, text ) {
-    try {
-        const validNumber = /^\+[0-9]{11,13}$/;
-
-        sendersList.forEach( ( number ) => {
-            if ( !number.match( validNumber ) ) {
-                return error( { number }, "Invalid sender Twilio number." );
-            }
-            return true;
-        } );
-
-        recipients.map( ( recipient, i ) => {
-            const newRecipient = recipient;
-            const twilioNumber = sendersList[ i % sendersList.length ];
-
-            // Do validation, Note: recipient.name is optional
-            if ( !recipient.location ) return error( { recipient }, "Missing recipient location." );
-            if ( !recipient.number ) return error( { recipient }, "Missing recipient number." );
-            if ( !recipient.latitude ) return error( { recipient }, "Missing recipient latitude." );
-            if ( !recipient.longitude ) return error( { recipient }, "Missing recipient longitude." );
-            if ( !recipient.number.match( validNumber ) ) return error( { recipient }, "Invalid recipient number." );
-            if ( !twilioNumber ) return error( { recipient }, "Invalid recipient Twilio number." );
-
-            newRecipient.name = ( recipient.name || "Unnamed" ).toUpperCase().trim();
-            newRecipient.language = ( recipient.language || "en" ).trim();
-            newRecipient.location = recipient.location.toUpperCase().trim();
-            newRecipient.twilioNumber = twilioNumber;
-            newRecipient.format = ( typeof recipient.format === "number" ? recipient.format : 1 );
-
-            return newRecipient;
-        } );
-
-        // console.log(senders, recipients); process.exit(1)
-
-        recipients.forEach( ( recipient, i ) => {
-            p.add( ( done ) => {
-                setTimeout( () => {
-                    sendText( recipient.twilioNumber, recipient.number, text, done );
-                }, i * sendInterval );
-            } );
-        } );
-
-        p.done( ( err ) => {
-            if ( err ) return error( err );
-            log.info( "Done." );
-        } );
-    } catch ( err ) {
-        error( err );
-    }
-}
-
-function sendForeCast( recipientsList, isNotMonthly = true ) {
+function sendForeCast( recipientsList, isForeCast = true ) {
     try {
         const validNumber = /^\+[0-9]{11,13}$/;
 
@@ -305,12 +258,10 @@ function sendForeCast( recipientsList, isNotMonthly = true ) {
             return newRecipient;
         } );
 
-        // console.log(senders, recipients); process.exit(1)
-
         recipients.forEach( ( recipient, i ) => {
             p.add( ( done ) => {
                 setTimeout( () => {
-                    if ( isNotMonthly ) {
+                    if ( isForeCast ) {
                         const url = `${ process.env.NAVIFEED_URL }${ getFTimes( recipient.format ) }&lat=${ recipient.latitude }&lon=${ recipient.longitude }`;
 
                         request( {
@@ -357,8 +308,12 @@ function sendForeCast( recipientsList, isNotMonthly = true ) {
                                 done( e );
                             }
                         } );
-                    } else {
+                    } else if ( recipient.format === 4 ) {
                         const text = createTextLineFormat4( recipient.location );
+
+                        sendText( recipient.twilioNumber, recipient.number, text, done );
+                    } else {
+                        const text = createTextLineFormat5();
 
                         sendText( recipient.twilioNumber, recipient.number, text, done );
                     }
@@ -383,9 +338,7 @@ process.argv.forEach( ( val ) => {
         sendFourDayForecast();
     } else if ( val === "monthly" ) {
         sendMonthlyMemo();
-    } else if ( val === "olamfarmers" ) {
-        const text = "Ujumbe huu unatoka kwa Olam. Toa magugu yazungukayo mita moja kutoka kwenye mti. Jumuisho la mvua kuanzia 1st Januari hadi sasa ni zaidi ya 50mm.";
-
-        sendSMSInParallel( recipientsOlamFarmesForeCastList, text );
+    } else if ( val === "daily:memo" ) {
+        sendForeCast( recipientsDailyMemoList, false );
     }
 } );
