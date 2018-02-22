@@ -21,7 +21,7 @@ const recipientsDailyMemoList = require( path.resolve( process.env.RECIPIENTS_DA
 const twilio = new Twilio( process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN );
 const senderID = String( process.env.SENDER_ID || "" );
 const sendInterval = Number( process.env.SEND_INTERVAL_MS ) || 30000;
-const p = parallel().timeout( 4 * 60 * 60 * 1000 );
+const p = parallel().timeout( 4 * 60 * 60 * 4000 );
 
 const today = moment.utc().startOf( "day" );
 const tomorrow = today.clone().add( 1, "day" );
